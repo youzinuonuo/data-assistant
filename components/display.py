@@ -1,8 +1,7 @@
 import streamlit as st
 from typing import List
 import pandas as pd
-from pandasai import Agent
-import os,pathlib
+import pathlib
 import uuid
 
 def display_dataframes(dfs: List[pd.DataFrame]):
