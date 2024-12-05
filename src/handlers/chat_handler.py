@@ -18,7 +18,7 @@ def chat_with_data(dfs: List[pd.DataFrame], query: str):
     
 
 def chat_lake(dfs: List[pd.DataFrame], query: str) -> None:
-    llm = BambooLLM(api_key="$2a$10$PNF8TSe4x.qVdXLLO6uYiOwqLj5xMPEYlI4JgabRtruQ/exo2LzTi")
+    llm = BambooLLM(api_key="")
     # os.environ["PANDASAI_API_KEY"] = ""
     config={
         "llm": llm,
