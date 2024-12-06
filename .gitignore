@@ -65,3 +65,6 @@ tmp/
 *.tmp
 *.bak
 
+# PandasAI cache
+*.db
+cache_db_*
