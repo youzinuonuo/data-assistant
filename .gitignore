@@ -39,6 +39,7 @@ venv.bak/
 .project
 .pydevproject
 .settings
+cache/
 
 # Jupyter Notebook
 .ipynb_checkpoints
@@ -63,3 +64,4 @@ temp/
 tmp/
 *.tmp
 *.bak
+
