@@ -1,11 +1,35 @@
 from typing import List, Optional
 import pandas as pd
-
+import requests
 
 class SimpleLLM:
-    # TODO: 替换为实际的LLM调用
+    def __init__(self, api_url: str):
+        self.api_url = api_url
+        
     def call(self, prompt: str) -> str:
-        return "print('Hello World')"  
+        try:
+            headers = {
+                # "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            payload = {
+                "prompt": prompt
+            }
+            
+            response = requests.post(
+                self.api_url,
+                headers=headers,
+                json=payload,
+                timeout=30
+            )
+            
+            response.raise_for_status()
+            result = response.json()
+            return result.get("response", "")
+            
+        except requests.exceptions.RequestException as e:
+            return f"API 请求错误: {str(e)}"
 
 class SimpleDataframeSerializer:
     """简化的DataFrame序列化器"""
@@ -13,13 +37,10 @@ class SimpleDataframeSerializer:
         # 获取列名和数据类型的映射
         dtype_dict = {col: str(dtype) for col, dtype in zip(df.columns, df.dtypes)}
         
-        return f"""
-        列信息:
-        {', '.join(f'{col}({dtype_dict[col]})' for col in df.columns)}
-        
-        前5行数据:
-        {df.head().to_dict()}
-        """
+        return (
+            "列信息: "+f"{', '.join(f'{col}({dtype_dict[col]})' for col in df.columns)}"
+            # f"前5行数据:\n"           # f"{df.head().to_dict()}"
+        )
 
 class SimpleAgent:
     """简化的Agent实现"""
@@ -33,12 +54,14 @@ class SimpleAgent:
         dfs_data = []
         for i, df in enumerate(self.dfs):
             df_str = self.serializer.serialize(df)
-            dfs_data.append(f"DataFrame {i}:\n{df_str}")
+            # 使用三引号来保持格式
+            dfs_data.append(f"""
+            dataFrame_{i}: {df_str}""" )
         
         # 构建prompt模板
         prompt = f"""
         Available DataFrames:
-        {'\n'.join(dfs_data)}
+        {''.join(dfs_data)}
         
         User Query: {query}
         
@@ -50,11 +73,11 @@ class SimpleAgent:
         The result type can be "string", "number", "dataframe", or "plot".
         
         Example format:
-        def query_function([dataframe_0, dataframe_1, ...]):
-            # Write code here
+        def query_function([dataFrame_0, dataFrame_1, ...])->result:
+            result = # Write code here #
             return result
         
-        Only return the function body after the '#' without '#' and 'return result', do not include the function definition or any other text outside the tags.
+        Only return the function body between the '#' including 'result =' and without 'return result', do not include the function definition or any other text outside the tags.
         
         """
         # 打印生成的prompt
@@ -77,11 +100,17 @@ class SimpleAgent:
         return self._execute_code(code)
     
     def _execute_code(self, code: str) -> str:
-        try:
-            exec(code, {}, self.dfs)
+        local_vars = {}
 
+        for i, df in enumerate(self.dfs):
+            local_vars[f"dataFrame_{i}"] = df
+        print("local_vars: ", local_vars, flush=True)
+        try:
+            exec(code, {}, local_vars)
+            return local_vars.get('result', 'No result found')
         except Exception as e:
             return f"Error executing code: {str(e)}"
+        
 def validate_code_safety(code: str) -> tuple[bool, str]:
     """
     Check if the code contains potentially dangerous operations.
@@ -129,11 +158,36 @@ if __name__ == "__main__":
     # 初始化Agent
     agent = SimpleAgent([df1, df2])
 
+    # s = "result = dataFrame_0['A'].mean()"
+    # result = agent._execute_code(s)
+    # print(f"计算结果: {result}")
+
     # agent._generate_prompt("Calculate the sum of column A in the first dataframe")
-    s = "dataframe_0['A'].sum()"
-    result = agent._execute_code(s)
-    print(f"计算结果: {result}")
+    agent._generate_prompt("Calculate the average value of column A")
 
     # 执行查询
     # result = agent.chat("Calculate the sum of column A in the first dataframe")
     # print(result)
+
+    """
+        Available DataFrames:
+
+            dataFrame_0: 列信息: A(int64), B(int64)
+            dataFrame_1: 列信息: X(int64), Y(int64)
+
+        User Query: Calculate the average value of column A
+
+        Generate Python function based on the information I provided above.
+
+        Ensure the function is syntactically correct and performs the required operations      
+        to extract or compute the requested information.
+        Available dataframes above is the parameter of function, and the function body should return the result according to the user's query.
+        The result type can be "string", "number", "dataframe", or "plot".
+
+        Example format:
+        def query_function([dataFrame_0, dataFrame_1, ...])->result:
+            result = # Write code here #
+            return result
+
+        Only return the function body between the '#' including 'result =' and without 'return result', do not include the function definition or any other text outside the tags.
+    """
