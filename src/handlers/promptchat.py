@@ -1,10 +1,15 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple
 import pandas as pd
 import requests
+import ast
+import black
+
 
 class SimpleLLM:
-    def __init__(self, api_url: str):
-        self.api_url = api_url
+    DEFAULT_API_URL = "http://localhost:8000/v1/chat/completions"
+    
+    def __init__(self, api_url: str = None):
+        self.api_url = api_url or self.DEFAULT_API_URL
         
     def call(self, prompt: str) -> str:
         try:
@@ -29,35 +34,46 @@ class SimpleLLM:
             return result.get("response", "")
             
         except requests.exceptions.RequestException as e:
-            return f"API 请求错误: {str(e)}"
+            return f"API request error: {str(e)}"
 
 class SimpleDataframeSerializer:
-    """简化的DataFrame序列化器"""
-    def serialize(self,df: pd.DataFrame) -> str:
-        # 获取列名和数据类型的映射
+    """Simplified DataFrame serializer"""
+    def serialize(self, df: pd.DataFrame) -> str:
+        # Get mapping of column names and data types
         dtype_dict = {col: str(dtype) for col, dtype in zip(df.columns, df.dtypes)}
         
         return (
-            "列信息: "+f"{', '.join(f'{col}({dtype_dict[col]})' for col in df.columns)}"
-            # f"前5行数据:\n"           # f"{df.head().to_dict()}"
+            "Columns: " + f"{', '.join(f'{col}({dtype_dict[col]})' for col in df.columns)}"
         )
 
 class SimpleAgent:
-    """简化的Agent实现"""
     def __init__(self, dfs: List[pd.DataFrame], llm: Optional[SimpleLLM] = None):
         self.dfs = dfs
         self.llm = llm or SimpleLLM()
         self.serializer = SimpleDataframeSerializer()
-    
+        
+
+        self.DANGEROUS_IMPORTS = [
+            'os', 'subprocess', 'sys', 'shutil', 
+            'socket', 'requests', 'urllib',
+            'pickle', 'marshal'
+        ]
+        
+        self.DANGEROUS_FUNCTIONS = [
+            'eval', 'exec', 'compile',
+            'open', 'write', 'system',
+            'remove', 'rmdir', 'unlink'
+        ]
+        
+        self.FILE_KEYWORDS = ['file', 'open', 'write', 'read']
     def _generate_prompt(self, query: str) -> str:
         # 序列化所有DataFrames
         dfs_data = []
         for i, df in enumerate(self.dfs):
             df_str = self.serializer.serialize(df)
-            # 使用三引号来保持格式
             dfs_data.append(f"""
             dataFrame_{i}: {df_str}""" )
-        
+    
         # 构建prompt模板
         prompt = f"""
         Available DataFrames:
@@ -71,123 +87,186 @@ class SimpleAgent:
         to extract or compute the requested information.
         Available dataframes above is the parameter of function, and the function body should return the result according to the user's query.
         The result type can be "string", "number", "dataframe", or "plot".
-        
+    
         Example format:
-        def query_function([dataFrame_0, dataFrame_1, ...])->result:
-            result = # Write code here #
+        def query_function(**kwargs):
+            # kwargs is a dictionary contains dataFrame_0, dataFrame_1, etc.
+            # Write python code here
             return result
-        
-        Only return the function body between the '#' including 'result =' and without 'return result', do not include the function definition or any other text outside the tags.
-        
+        You should complete the query_function and return the full function as the answer, make sure the function is complete and don't return any hints other than function.
         """
-        # 打印生成的prompt
-        print(prompt)
-        
+    
+        print("prompt:\n", prompt, flush=True)
         return prompt
+
+    def _validate_code_safety(self, code: str) -> Tuple[bool, str]:
+        """
+        Check if code contains potentially dangerous operations
         
+        Args:
+            code: Code string to check
+        
+        Returns:
+            Tuple[bool, str]: (is_safe, error_message)
+        """
+        # Check dangerous imports
+        for imp in self.DANGEROUS_IMPORTS:
+            if f"import {imp}" in code or f"from {imp}" in code:
+                return False, f"Detected dangerous import: {imp}"
+                
+        # Check dangerous functions
+        for func in self.DANGEROUS_FUNCTIONS:
+            if f"{func}(" in code:
+                return False, f"Detected dangerous function call: {func}"
+        
+        # Check file operation keywords
+        for keyword in self.FILE_KEYWORDS:
+            if keyword in code.lower():
+                return False, f"Detected suspicious file operation: {keyword}"
+        
+        return True, "Code safety check passed"
+
+    def _format_code(self, code: str) -> Tuple[bool, str]:
+        """
+        Format and validate code
+        
+        Args:
+            code: Code string to format
+            
+        Returns:
+            Tuple[bool, str]: (success, formatted_code_or_error)
+        """
+        try:
+            # Basic syntax validation
+            tree = ast.parse(code)
+            formatted_code = ast.unparse(tree)
+            
+            print("\nAST formatted code:")
+            print(f"{formatted_code}")
+            
+            # Format with Black
+            formatted_code = black.format_str(formatted_code, mode=black.Mode())
+            
+            print("\nBlack formatted code:")
+            print(f"{formatted_code}")
+            
+            return True, formatted_code
+            
+        except SyntaxError as e:
+            return False, f"Syntax error: {str(e)}"
+        except Exception as e:
+            return False, f"Code formatting error: {str(e)}"
+
+    def _execute_code(self, code: str) -> str:
+        local_vars = {}
+        
+        try:
+            # 1. Execute function definition
+            exec(code, {}, local_vars)
+            
+            # 2. Get defined function
+            query_function = local_vars.get('query_function')
+            if not query_function:
+                return "query_function not found"
+            
+            # 3. Prepare parameters
+            kwargs = {
+                f"dataFrame_{i}": df 
+                for i, df in enumerate(self.dfs)
+            }
+            
+            # 4. Call function with parameters
+            result = query_function(**kwargs)
+            return result
+            
+        except Exception as e:
+            return f"Code execution error: {str(e)}"
+
     def chat(self, query: str) -> str:
-        # 1. 生成prompt
+        # 1. Generate prompt
         prompt = self._generate_prompt(query)
         
-        # 2. 调用LLM
+        # 2. Call LLM
         code = self.llm.call(prompt)
-        # 3. 检查代码安全性
-        is_safe, message = validate_code_safety(code)
+        
+        # 3. Check code safety
+        is_safe, message = self._validate_code_safety(code)
         if not is_safe:
             return f"Code safety check failed: {message}"
         
-        # 4. 执行代码
-        return self._execute_code(code)
-    
-    def _execute_code(self, code: str) -> str:
-        local_vars = {}
-
-        for i, df in enumerate(self.dfs):
-            local_vars[f"dataFrame_{i}"] = df
-        print("local_vars: ", local_vars, flush=True)
-        try:
-            exec(code, {}, local_vars)
-            return local_vars.get('result', 'No result found')
-        except Exception as e:
-            return f"Error executing code: {str(e)}"
+        # 4. Format code
+        success, formatted_code = self._format_code(code)
+        if not success:
+            return formatted_code
         
-def validate_code_safety(code: str) -> tuple[bool, str]:
-    """
-    Check if the code contains potentially dangerous operations.
-    
-    Args:
-        code: The code string to check.
-    
-    Returns:
-        tuple[bool, str]: (Is safe, Error message)
-    """
-    dangerous_imports = [
-        'os', 'subprocess', 'sys', 'shutil', 
-        'socket', 'requests', 'urllib',
-        'pickle', 'marshal'
-    ]
-    
-    dangerous_functions = [
-        'eval', 'exec', 'compile',
-        'open', 'write', 'system',
-        'remove', 'rmdir', 'unlink'
-    ]
-    
-    for imp in dangerous_imports:
-        if f"import {imp}" in code or f"from {imp}" in code:
-            return False, f"Detected dangerous module import: {imp}"
-            
-    for func in dangerous_functions:
-        if f"{func}(" in code:
-            return False, f"Detected dangerous function call: {func}"
-    
-    file_keywords = ['file', 'open', 'write', 'read']
-    for keyword in file_keywords:
-        if keyword in code.lower():
-            return False, f"Detected suspicious file operation: {keyword}"
-    
-    return True, "Code check passed"
+        # 5. Execute code
+        return self._execute_code(formatted_code)
+
 
 # 使用示例
 if __name__ == "__main__":
     import pandas as pd
     # 创建示例数据
-    df1 = pd.DataFrame({'A': [1, 2, 3], 'B': [4, 5, 6]})
+    df1 = pd.DataFrame({'A': ['hello', 'helloa', 'test'], 'B': [4, 5, 6]})
     df2 = pd.DataFrame({'X': [7, 8, 9], 'Y': [10, 11, 12]})
-    
-    # 初始化Agent
+
     agent = SimpleAgent([df1, df2])
+    # prompt = agent._generate_prompt("Concatenate the all string in column A and sum the column B and return both result")
+
+    s = """def query_function(**kwargs):
+    # Extract dataFrame_0 from kwargs
+    dataFrame_0 = kwargs.get('dataFrame_0')
+    
+    # Concatenate all strings in column A of dataFrame_0
+    concatenated_string = ''.join(dataFrame_0['A'].astype(str))
+    
+    # Sum the values in column B of dataFrame_0
+    summed_value = dataFrame_0['B'].sum()
+    
+    # Return both results as a tuple
+    return concatenated_string, summed_value
+
+    """
+
+    success, formatted_code = agent._format_code(s)
+    if not success:
+        print(f"格式化失败: {formatted_code}")
+        exit()
+    result = agent._execute_code(formatted_code)
+    print(f"计算结果: {result}")
+    # text = df1['A'].str.extract('([a-zA-Z]+)')
+    # print("\n提取字母后的结果:")
+    # result = ' '.join(text[0].dropna().tolist())
+    # print("\n最终合并的字符串:")
+    # print(result)
+
+    # print("原始DataFrame:")
+    # print(df1)
+    # print("\n列A的内容:")
+    # print(df1['A'])  # 提取A列
+
+    # # 对A列进行正则提取
+    # text = df1['A'].str.extract('([a-zA-Z]+)')
+    # print("\n提取字母后的结果:")
+    # print(text)
+
+    # # 合并结果
+    # result = ' '.join(text[0].dropna().tolist())
+    # print("\n最终合并的字符串:")
+    # print(result)
+    # 初始化Agent
+    # agent = SimpleAgent([df1, df2])
+
+    # test_code = "text = dataFrame_0['A'].str.extract('(a-zA-Z)+')\n    result = ' '.join(text)\n"
+    # result = agent._execute_code(test_code)
 
     # s = "result = dataFrame_0['A'].mean()"
     # result = agent._execute_code(s)
-    # print(f"计算结果: {result}")
 
     # agent._generate_prompt("Calculate the sum of column A in the first dataframe")
-    agent._generate_prompt("Calculate the average value of column A")
+    # agent._generate_prompt("Calculate the average value of column A")
+
 
     # 执行查询
     # result = agent.chat("Calculate the sum of column A in the first dataframe")
     # print(result)
-
-    """
-        Available DataFrames:
-
-            dataFrame_0: 列信息: A(int64), B(int64)
-            dataFrame_1: 列信息: X(int64), Y(int64)
-
-        User Query: Calculate the average value of column A
-
-        Generate Python function based on the information I provided above.
-
-        Ensure the function is syntactically correct and performs the required operations      
-        to extract or compute the requested information.
-        Available dataframes above is the parameter of function, and the function body should return the result according to the user's query.
-        The result type can be "string", "number", "dataframe", or "plot".
-
-        Example format:
-        def query_function([dataFrame_0, dataFrame_1, ...])->result:
-            result = # Write code here #
-            return result
-
-        Only return the function body between the '#' including 'result =' and without 'return result', do not include the function definition or any other text outside the tags.
-    """

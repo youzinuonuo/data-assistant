@@ -3,7 +3,7 @@ import pathlib
 from components.display import display_dataframes, display_results
 from components.input import get_excel_file
 from src.handlers.file_handler import ExcelFileHandler
-from src.handlers.chat_handler import chat_with_data, chat_lake
+from src.handlers.chat_handler import chat_with_data, chat_lake, chat_with_llm
 import os
 
 st.set_page_config(
@@ -57,7 +57,8 @@ def main():
                     st.write(user_input)
                 
                 with st.spinner("Analyzing..."):
-                    response = chat_lake(st.session_state['dfs'], user_input)
+                    # response = chat_lake(st.session_state['dfs'], user_input)
+                    response = chat_with_llm(st.session_state['dfs'], user_input)
                     with st.chat_message("assistant"):
                         with st.expander("Result", expanded=True):
                             display_results(response)

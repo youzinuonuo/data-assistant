@@ -4,7 +4,7 @@ from pandasai import SmartDatalake, Agent
 from pandasai.responses import StreamlitResponse
 from pandasai.llm import BambooLLM
 import os
-from promptchat import SimpleAgent, SimpleLLM
+from src.handlers.promptchat import SimpleAgent
 def chat_with_data(dfs: List[pd.DataFrame], query: str):
     try:
         lake = SmartDatalake(dfs)
@@ -32,7 +32,6 @@ def chat_lake(dfs: List[pd.DataFrame], query: str) :
     return response;
 
 def chat_with_llm(dfs: List[pd.DataFrame], query: str):
-    llm = SimpleLLM(api_url="http://localhost:8000/v1/chat/completions")
-    agent = SimpleAgent(dfs, llm)
+    agent = SimpleAgent(dfs)
     response = agent.chat(query)
     return response;

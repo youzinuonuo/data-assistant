@@ -1,3 +1,4 @@
 pandas==1.5.3
 pandasai==2.4.0
 streamlit==1.39.0
+black==24.1.0
