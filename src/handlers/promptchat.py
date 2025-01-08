@@ -1,5 +1,8 @@
 from typing import List, Optional, Tuple
 import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
 import requests
 import ast
 import black
@@ -47,6 +50,9 @@ class SimpleDataframeSerializer:
         )
 
 class SimpleAgent:
+    # 添加常用包列表
+
+
     def __init__(self, dfs: List[pd.DataFrame], llm: Optional[SimpleLLM] = None):
         self.dfs = dfs
         self.llm = llm or SimpleLLM()
@@ -81,19 +87,31 @@ class SimpleAgent:
         
         User Query: {query}
         
-        Generate Python function based on the information I provided above.
+        Generate Python function based on the information provided above.
+        The following packages are already imported and available:
+        ```python
+        import pandas as pd
+        import numpy as np
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+        ```
+        DO NOT include any import statements in your code.
         
-        Ensure the function is syntactically correct and performs the required operations 
-        to extract or compute the requested information.
-        Available dataframes above is the parameter of function, and the function body should return the result according to the user's query.
-        The result type can be "string", "number", "dataframe", or "plot".
-    
+        Requirements:
+        1. Function should be named 'query_function'
+        2. Use **kwargs to receive parameters
+        3. Access dataframes as: dataFrame_0, dataFrame_1, etc. from kwargs
+        4. Return types can be: string, number, pandas DataFrame, matplotlib Figure (always use plt.gcf() to return the current figure)
+        
         Example format:
         def query_function(**kwargs):
-            # kwargs is a dictionary contains dataFrame_0, dataFrame_1, etc.
-            # Write python code here
+            # Get dataframes from kwargs         
+            # Your code here using available packages
+            # Example: df0.groupby().agg()
+            # Example: plt.figure()
+
             return result
-        You should complete the query_function and return the full function as the answer, make sure the function is complete and don't return any hints other than function.
+        Complete the query_function and return the full function as the answer without any imports or additional text.
         """
     
         print("prompt:\n", prompt, flush=True)
@@ -137,18 +155,19 @@ class SimpleAgent:
             Tuple[bool, str]: (success, formatted_code_or_error)
         """
         try:
+
+            formatted_code = black.format_str(code, mode=black.Mode())
+            
+            print("\nBlack formatted code:")
+            print(f"{formatted_code}")
+
             # Basic syntax validation
-            tree = ast.parse(code)
+            tree = ast.parse(formatted_code)
             formatted_code = ast.unparse(tree)
             
             print("\nAST formatted code:")
             print(f"{formatted_code}")
             
-            # Format with Black
-            formatted_code = black.format_str(formatted_code, mode=black.Mode())
-            
-            print("\nBlack formatted code:")
-            print(f"{formatted_code}")
             
             return True, formatted_code
             
@@ -157,26 +176,28 @@ class SimpleAgent:
         except Exception as e:
             return False, f"Code formatting error: {str(e)}"
 
-    def _execute_code(self, code: str) -> str:
+    def _execute_code(self, code: str, kwargs: dict) -> str:
+        # Prepare execution environment with imported packages
+        global_vars = {
+            'pd': pd,
+            'np': np,
+            'plt': plt,
+            'sns': sns
+        }
         local_vars = {}
         
         try:
             # 1. Execute function definition
-            exec(code, {}, local_vars)
+            exec(code, global_vars, local_vars)
             
             # 2. Get defined function
             query_function = local_vars.get('query_function')
             if not query_function:
                 return "query_function not found"
-            
-            # 3. Prepare parameters
-            kwargs = {
-                f"dataFrame_{i}": df 
-                for i, df in enumerate(self.dfs)
-            }
-            
+   
             # 4. Call function with parameters
             result = query_function(**kwargs)
+            
             return result
             
         except Exception as e:
@@ -199,74 +220,80 @@ class SimpleAgent:
         if not success:
             return formatted_code
         
+        kwargs = self._generate_kwargs(self.dfs)
         # 5. Execute code
-        return self._execute_code(formatted_code)
+        return self._execute_code(formatted_code, kwargs)
+    
+    def _generate_kwargs(self, dfs: List[pd.DataFrame]) -> dict:
+        return {
+            f"dataFrame_{i}": df 
+            for i, df in enumerate(dfs)
+        }
 
+    def testChat(self, query: str):
+        code = """
+def query_function(**kwargs):
+    # Get the dataframe from kwargs
+    df0 = kwargs.get('dataFrame_0')
+    
+    # Count the occurrences of each value in column 'A'
+    value_counts = df0['A'].value_counts()
+    
+    # Generate a bar plot for the value counts
+    plt.figure(figsize=(8, 6))
+    sns.barplot(x=value_counts.index, y=value_counts.values, palette='viridis')
+    plt.xlabel('Values in A')
+    plt.ylabel('Count')
+    plt.title('Count of Values in Column A')
+    
+    # Return the current figure
+    return plt.gcf()
+        """
+
+        is_safe, message = self._validate_code_safety(code)
+        if not is_safe:
+            return f"Code safety check failed: {message}"
+        
+        # 4. Format code
+        success, formatted_code = self._format_code(code)
+        if not success:
+            return formatted_code
+        
+        #test
+        df1 = pd.DataFrame({'A': ['hello', 'hell', 'test', 'test', 'blabla'], 'B': [4, 5, 6, 7, 8]})
+        df2 = pd.DataFrame({'X': [7, 8, 9], 'Y': [10, 11, 12]})
+        dfs = [df1, df2]
+        kwargs = self._generate_kwargs(dfs)
+        # 5. Execute code
+        return self._execute_code(formatted_code, kwargs)
 
 # 使用示例
 if __name__ == "__main__":
     import pandas as pd
     # 创建示例数据
-    df1 = pd.DataFrame({'A': ['hello', 'helloa', 'test'], 'B': [4, 5, 6]})
+    df1 = pd.DataFrame({'A': ['hello', 'hell', 'test', 'test', 'blabla'], 'B': [4, 5, 6, 7, 8]})
     df2 = pd.DataFrame({'X': [7, 8, 9], 'Y': [10, 11, 12]})
 
     agent = SimpleAgent([df1, df2])
-    # prompt = agent._generate_prompt("Concatenate the all string in column A and sum the column B and return both result")
+    prompt = agent._generate_prompt("Counting the data in column a and generating a bar graph")
 
-    s = """def query_function(**kwargs):
-    # Extract dataFrame_0 from kwargs
-    dataFrame_0 = kwargs.get('dataFrame_0')
+    generated_code_1 = """
+def query_function(**kwargs):
+    # Get the dataframe from kwargs
+    df0 = kwargs.get('dataFrame_0')
     
-    # Concatenate all strings in column A of dataFrame_0
-    concatenated_string = ''.join(dataFrame_0['A'].astype(str))
+    # Count the occurrences of each value in column 'A'
+    value_counts = df0['A'].value_counts()
     
-    # Sum the values in column B of dataFrame_0
-    summed_value = dataFrame_0['B'].sum()
+    # Generate a bar plot for the value counts
+    plt.figure(figsize=(8, 6))
+    sns.barplot(x=value_counts.index, y=value_counts.values, palette='viridis')
+    plt.xlabel('Values in A')
+    plt.ylabel('Count')
+    plt.title('Count of Values in Column A')
     
-    # Return both results as a tuple
-    return concatenated_string, summed_value
-
-    """
-
-    success, formatted_code = agent._format_code(s)
-    if not success:
-        print(f"格式化失败: {formatted_code}")
-        exit()
-    result = agent._execute_code(formatted_code)
-    print(f"计算结果: {result}")
-    # text = df1['A'].str.extract('([a-zA-Z]+)')
-    # print("\n提取字母后的结果:")
-    # result = ' '.join(text[0].dropna().tolist())
-    # print("\n最终合并的字符串:")
-    # print(result)
-
-    # print("原始DataFrame:")
-    # print(df1)
-    # print("\n列A的内容:")
-    # print(df1['A'])  # 提取A列
-
-    # # 对A列进行正则提取
-    # text = df1['A'].str.extract('([a-zA-Z]+)')
-    # print("\n提取字母后的结果:")
-    # print(text)
-
-    # # 合并结果
-    # result = ' '.join(text[0].dropna().tolist())
-    # print("\n最终合并的字符串:")
-    # print(result)
-    # 初始化Agent
-    # agent = SimpleAgent([df1, df2])
-
-    # test_code = "text = dataFrame_0['A'].str.extract('(a-zA-Z)+')\n    result = ' '.join(text)\n"
-    # result = agent._execute_code(test_code)
-
-    # s = "result = dataFrame_0['A'].mean()"
-    # result = agent._execute_code(s)
-
-    # agent._generate_prompt("Calculate the sum of column A in the first dataframe")
-    # agent._generate_prompt("Calculate the average value of column A")
+    # Return the current figure
+    return plt.gcf()
+    """ 
 
 
-    # 执行查询
-    # result = agent.chat("Calculate the sum of column A in the first dataframe")
-    # print(result)
