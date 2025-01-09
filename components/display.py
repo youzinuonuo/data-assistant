@@ -29,13 +29,16 @@ def display_results(result) -> None:
         
         # Handle Matplotlib figure
         elif isinstance(result, plt.Figure):
-            # Save figure to memory buffer
             buf = io.BytesIO()
             result.savefig(buf, format='png', bbox_inches='tight')
             buf.seek(0)
             
-            # Display the figure
-            st.image(buf, use_column_width=True)
+            # Control display width
+            st.image(
+                buf, 
+                use_column_width=False,  # Don't use full column width
+                width=600  # Set fixed width in pixels
+            )
             
             # Add download button
             key = f"download_{str(uuid.uuid4())}"
