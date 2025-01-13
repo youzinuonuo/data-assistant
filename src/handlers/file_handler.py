@@ -11,20 +11,21 @@ class ExcelFileHandler:
             xls = pd.ExcelFile(self.file)
             sheet_names = xls.sheet_names
             
-            selected_sheets = st.multiselect(
-                "Select sheets to analyze",
+            selected_sheet = st.selectbox(
+                "Select a sheet to analyze",
                 options=sheet_names,
-                default=sheet_names[0]
+                index=0
             )
             
-            if not selected_sheets:
+            if not selected_sheet:
                 st.warning("Please select at least one sheet")
                 return None
                 
             dfs = []
-            for sheet in selected_sheets:
-                df = pd.read_excel(xls, sheet_name=sheet)
-                dfs.append(df)
+            # for sheet in selected_sheets:
+            #     df = pd.read_excel(xls, sheet_name=sheet)
+            df = pd.read_excel(xls, sheet_name=selected_sheet)
+            dfs.append(df)
             return dfs
             
         except Exception as e:
