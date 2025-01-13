@@ -259,7 +259,6 @@ class SimpleAgent:
                 last_code = code
                 last_error = e
         
-        # 只在循环结束后返回错误信息
         return f"Failed after {self.MAX_RETRIES} attempts: {str(last_error)}"
    
 # 使用示例
