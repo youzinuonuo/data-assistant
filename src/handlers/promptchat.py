@@ -50,27 +50,17 @@ class SimpleLLM:
         # except requests.exceptions.RequestException as e:
         #     return f"API request error: {str(e)}"
 
-class SimpleDataframeSerializer:
-    """Simplified DataFrame serializer"""
-    def serialize(self, df: pd.DataFrame) -> str:
-        # Get mapping of column names and data types
-        dtype_dict = {col: str(dtype) for col, dtype in zip(df.columns, df.dtypes)}
-        
-        return (
-            "Columns: " + f"{', '.join(f'{col}({dtype_dict[col]})' for col in df.columns)}"
-        )
-
 class SecurityError(Exception):
     """Custom exception for security validation failures"""
     pass
 
-class SimpleAgent:
+# class SimpleAgent:
     MAX_RETRIES = 5
     
     def __init__(self, dfs: List[pd.DataFrame], llm: Optional[SimpleLLM] = None):
         self.dfs = dfs
         self.llm = llm or SimpleLLM()
-        self.prompt_manager = PromptManager(dfs)
+        self.prompt_manager = PromptManager()
 
         self.DANGEROUS_FUNCTIONS = [
             'eval', 'exec', 'compile',
@@ -96,7 +86,7 @@ class SimpleAgent:
         code = self.llm.call(prompt)
         
         if not code:
-            raise ValueError("LLM returned empty code")
+            raise ValueError("returned empty code")
         return code
 
     def _validate_return_type(self, result: Any) -> None:
@@ -133,10 +123,10 @@ class SimpleAgent:
         # 2. Validate security
         self._validate_code_safety(formatted_code)  
         
-        # 2. Execute code   
+        # 3. Execute code   
         result = self._execute_code(formatted_code, self.dfs[0])
         
-        # 3. Validate return type
+        # 4. Validate return type
         self._validate_return_type(result)
         
         return result

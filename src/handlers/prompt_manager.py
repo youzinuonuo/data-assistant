@@ -1,7 +1,5 @@
 import pandas as pd
 class PromptManager:
-    def __init__(self, dfs):
-        self.dfs = dfs
     
     def get_initial_prompt(self, query: str, df: pd.DataFrame) -> str:
         """Generate initial prompt for code generation"""
